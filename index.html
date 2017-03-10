@@ -1,0 +1,271 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>在线法院</title>
+	</head>
+	<style>
+		body{
+		overflow:scroll;
+		overflow-x:hidden;
+		overflow-y:hidden;
+		 padding:0 0 0 0; 
+		 margin:0 auto;
+		}
+		p{
+			margin:0;
+			padding:0;
+		}
+		#loading{
+			position:absolute;
+			top:50%;
+			left:50%;
+			margin-left:-122px;
+			margin-top:-127px;
+			width:244px;
+			height:254px;
+			text-align:center;
+			font-size:18px;
+			color:#666;
+			font-family:"微软雅黑",Arial,"宋体";;
+		}
+		#loading p{
+			padding:20px 0;
+		}
+		.loading-part{
+			padding-top:50px;
+		}
+		.loaderroe-txt a{
+			font-size:14px;
+			margin-left:20px;
+			color:#28a0fa;
+			text-decoration: none;
+		}
+	</style>
+	<script type="text/javascript" src="jquery.min.js"></script>
+	<body >
+
+		<div id="loading">
+			<div class="loading-part">
+				<img src="images/loading.gif">
+				<p>加载中...</p>
+			</div>
+		</div>
+
+		<webview id="web" src="data:text/plain, " autosize="on" style="width:996px; height:718px;margin:0 auto;" nodeintegration="on" plugins="on" disablewebsecurity="off">
+		</webview>
+	</body>
+	<script type="text/javascript">
+		//
+		let loadFailed = false;
+		let isLoaded = false;
+		let isInfosended = false;
+        let loadingVersionPage = false;
+		const ipc = require('electron').ipcRenderer;
+		const path = require('path');
+		const BrowserWindow = require('electron').remote.BrowserWindow;
+		const appFolder = path.resolve(process.execPath, '..');
+		const rootAtomFolder = path.resolve(appFolder, '..');
+		var indexUrl = "";
+		
+		
+		var web = document.getElementById('web');
+		var installPath = path.join(rootAtomFolder,"tmp");
+		var config = {};
+		/*清除客户端缓存*/
+		function clearAll(){
+			var ses = web.getWebContents().session;
+			ses.clearCache(function(){
+			 console.log("clearCache________")
+			});
+			ses.cookies.remove(config['src'],"ui",function(){
+				console.log("ui")
+			});
+			ses.cookies.remove(config['src'],"un",function(){
+				console.log("un")
+			});
+			ses.cookies.remove(config['src'],"p",function(){
+				console.log("p")
+			});
+		
+		}
+		/*接收后台更新url地址*/
+		web.addEventListener("ipc-message",function(evt,args){
+			downloadNewVersion(evt.channel);
+		 
+		 })
+		 
+		web.addEventListener("dom-ready",domReadyFun);
+		function domReadyFun(){
+			web.removeEventListener('dom-ready',domReadyFun);
+			//web.addEventListener('did-finish-load',sendInfo);
+			$("#web").css({width:config['width'],height:config['height']})  //设置客户端显示大小
+			$("#loading").show();
+			clearAll();
+			cheackUpdate();  //检查版本更新
+		}
+		/*获取客户端配置内容信息*/
+        ipc.on('index_info',function(evet,args){
+			config = JSON.parse(args);
+		 });
+		/*打开新窗口监听函数*/
+		web.addEventListener("new-window",function(event){
+			var win = new BrowserWindow({ width: config["width"], height: config["height"], show: false , 
+			webPreferences:{plugins:true,allowDisplayingInsecureContent:true}});
+			win.on('closed', function() {
+			win = null;
+			});
+			win.loadURL(event.url);
+			win.show();
+		})
+		
+		 //打开调试工具
+        ipc.on('open_devtol',function(evt,args){
+			web.openDevTools();
+		 });
+		// Ctrl+R 重载页面刷新
+        ipc.on('reload_content',function(evt,args){
+			web.reloadIgnoringCache();
+		 });
+		 
+		function cheackUpdate(){
+			let url = config.version.url;
+			var ajax;
+            ajax  = requestVersion(url,null,function(data){
+				if(data==""){
+					$("#loading").html('<div class="loaderror-part"><img src="images/loaderror.jpg"><p class="loaderroe-txt">网络连接失败<a href="javascript:onReload();">重试</a></p></div>');
+					return
+				} 
+                data = data.replace(/'/g,"\"").replace(/\s+/g,"");
+                data = JSON.parse(data);
+                if(data.version>config.version.v){
+                    console.log("升级页面!");
+					indexUrl = data.htmlUrl;
+                    web.loadURL(data.htmlUrl,{"extraHeaders" : "pragma: no-cache\n"});
+                    loadingVersionPage = true;
+                }else{
+					indexUrl = config["src"];
+					web.loadURL(config["src"],{"extraHeaders" : "pragma: no-cache\n"});
+				}
+				web.addEventListener('did-finish-load',sendInfo);
+            },function(){
+				$("#loading").html('<div class="loaderror-part"><img src="images/loaderror.jpg"><p class="loaderroe-txt">网络连接失败<a href="javascript:onReload();">重试</a></p></div>');
+			});
+		}
+		
+		function onReload(){
+			 $("#loading").html('<div class="loading-part"><img src="images/loading.gif"><p>加载中...</p></div>');
+			cheackUpdate();
+		}
+
+		function sendInfo(e){
+			console.log("e"+e.currentTarget.src);
+			if(!loadFailed){
+			$("#loading").hide();
+			$("#web").show();
+			}
+			
+			//web.removeEventListener('did-finish-load',sendInfo); 
+		}
+
+
+        web.addEventListener('did-fail-load',function(e){
+			console.log("fail load!!!");
+			console.log("错误描述"+e.errorDescription+",errorCode"+e.errorCode);
+			if(e.errorCode!=-3){
+			loadFailed = true;
+			$("#loading").html('<div class="loaderror-part"><img src="images/loaderror.jpg"><p class="loaderroe-txt">网络连接失败<a href="javascript:reload();">重试</a></p></div>');
+			$("#loading").show();
+			$("#web").hide();
+			}
+			
+			
+		});
+
+		/*失败重新加载*/
+		function reload(){
+		   loadFailed = false;
+		   isLoaded = false;
+		   isInfosended = false;
+		   $("#loading").empty();
+		   $("#loading").html('<div class="loading-part"><img src="images/loading.gif"><p>加载中...</p></div>');
+		   //web.reloadIgnoringCache();
+		   web.loadURL(indexUrl,{"extraHeaders" : "pragma: no-cache\n"});
+		}
+
+		 
+		function checkUrl(args){
+		  if(args.indexOf('http')!=-1){
+			return true
+		  }
+		   return false
+		}
+		
+		
+		function requestVersion(url,data,callback,errcallback,async){
+			async = async||true;
+			$.ajax({
+				type:"GET",
+				url:url,
+				url:url,
+				data:data,
+				cache:false,
+				async:async,
+				dataType:"text",
+				contentType:"application/json;charset=UTF-8",
+				traditional:true,
+				processData:true,
+				success:function(data){
+					if(callback) callback(data);
+				},
+				error:function(err){
+					console.log("err:",err,"request",url,"error data:",data);
+					if(errcallback) errcallback();
+				}
+			});
+		}
+
+        let reobj;
+        let loadednum = 0;
+        let total = 0;
+        function downloadNewVersion(url){
+            let fs = require("fs");
+            let request = require("request");
+			 if(!fs.existsSync(installPath)){
+				 fs.mkdirSync(installPath);
+			 }
+            reobj = request.get(url)
+            .on('error', function(err) {
+                console.log(err);
+                alert("文件下载失败!");
+            })
+            .on('response',function(response){
+                total = parseInt(response.headers["content-length"]);
+            })
+            .on('data',function(chunk){
+                if(total>0){
+                    loadednum+=chunk.length;
+                    console.log('loaded:'+loadednum,'progress:'+(loadednum/total*100).toFixed(2)+'%')
+					if(parseInt(loadednum/total*100)>2){
+					web.send("progress",parseInt(loadednum/total*100))
+					}
+					
+                }
+            })
+            .on('complete',function(response){
+                loadednum = 0;
+                total = 0;
+            })
+            .pipe(fs.createWriteStream(installPath+"/install.exe"))
+            .on('close',function(){
+                console.log("写文件完成!");
+                const spawn = require('child_process').spawnSync;
+                var exc = spawn(installPath+"/install.exe");
+				
+            });
+        }
+		
+		
+
+	</script>
+</html>
